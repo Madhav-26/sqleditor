@@ -1,0 +1,986 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DataStudio IDE - In-Browser SQL & Analytics Studio</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- CodeMirror 5 CDN for SQL Code Editor -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/theme/dracula.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/sql/sql.min.js"></script>
+
+    <!-- SheetJS for parsing Excel files (.xlsx, .xls) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <!-- PapaParse for parsing CSV files -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    
+    <!-- AlaSQL for client-side SQL execution & multi-table JOINs -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/alasql/4.1.0/alasql.min.js"></script>
+    
+    <!-- Chart.js for visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- FontAwesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+        }
+
+        .font-mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* CodeMirror sizing & styling tweaks */
+        .CodeMirror {
+            height: 100% !important;
+            font-family: 'JetBrains Mono', monospace !important;
+            font-size: 13px !important;
+            background-color: #090d16 !important;
+            border-radius: 0.5rem;
+            padding: 8px 0;
+        }
+
+        .CodeMirror-gutters {
+            background-color: #0f172a !important;
+            border-right: 1px solid #1e293b !important;
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #090d16;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+
+        .drop-zone {
+            transition: all 0.2s ease-in-out;
+            border: 2px dashed #334155;
+        }
+        .drop-zone.dragover {
+            border-color: #3b82f6;
+            background-color: rgba(59, 130, 246, 0.08);
+        }
+
+        .tab-btn.active {
+            border-bottom: 2px solid #3b82f6;
+            color: #60a5fa;
+            background-color: rgba(30, 41, 59, 0.5);
+        }
+
+        /* Refresh Spinning Animation */
+        @keyframes spinSlow {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .animate-spin-fast {
+            animation: spinSlow 0.75s linear infinite;
+        }
+    </style>
+</head>
+<body class="h-full flex flex-col text-slate-100 overflow-hidden">
+
+    <!-- Top Navigation Header -->
+    <header class="h-14 border-b border-slate-800 bg-slate-900/90 backdrop-blur flex items-center justify-between px-4 shrink-0 z-20">
+        <div class="flex items-center space-x-3">
+            <div class="h-8 w-8 rounded-lg bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-500/20">
+                <i class="fa-solid fa-terminal text-white text-sm"></i>
+            </div>
+            <div>
+                <h1 class="text-sm font-bold text-white tracking-tight leading-none flex items-center gap-2">
+                    DataStudio IDE <span class="text-[10px] font-normal px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">SQL & Analytics</span>
+                </h1>
+            </div>
+        </div>
+
+        <!-- Quick Header Action Buttons with Excel Sync & Controls -->
+        <div class="flex items-center space-x-2">
+            <!-- Sync / Refresh Excel Data Button -->
+            <div class="flex items-center gap-2 bg-slate-800/80 border border-slate-700/60 rounded-lg px-2.5 py-1 text-xs">
+                <button id="btnRefreshData" onclick="refreshDataSources()" class="text-slate-300 hover:text-blue-400 transition flex items-center gap-1.5" title="Re-sync Excel/CSV data files">
+                    <i id="refreshIcon" class="fa-solid fa-rotate text-xs"></i>
+                    <span class="font-medium">Sync Data</span>
+                </button>
+                <span id="lastSyncTimestamp" class="text-[10px] text-slate-400 font-mono border-l border-slate-700 pl-2">Last synced: Never</span>
+            </div>
+
+            <button onclick="loadDemoData()" class="text-xs px-3 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-lg flex items-center gap-1.5 transition">
+                <i class="fa-solid fa-database text-xs"></i> Load Demo Datasets
+            </button>
+            <button onclick="openUploadModal()" class="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg flex items-center gap-1.5 transition shadow-lg shadow-blue-500/20 font-medium">
+                <i class="fa-solid fa-plus text-xs"></i> Add Files
+            </button>
+        </div>
+    </header>
+
+    <!-- Main IDE Body Grid -->
+    <div class="flex-1 flex overflow-hidden">
+
+        <!-- Left Sidebar: Schema Inspector, Saved Tables & History -->
+        <aside class="w-72 border-r border-slate-800 bg-slate-900/50 flex flex-col shrink-0">
+            <!-- Sidebar Navigation Tabs -->
+            <div class="flex border-b border-slate-800 text-xs font-semibold text-slate-400">
+                <button onclick="switchSidebarTab('tables')" id="tabBtnTables" class="flex-1 py-2.5 text-center hover:text-slate-200 border-b-2 border-blue-500 text-blue-400 bg-slate-800/40">
+                    <i class="fa-solid fa-table me-1"></i> Tables (<span id="tableCountBadge">0</span>)
+                </button>
+                <button onclick="switchSidebarTab('history')" id="tabBtnHistory" class="flex-1 py-2.5 text-center hover:text-slate-200 border-b-2 border-transparent">
+                    <i class="fa-solid fa-clock-rotate-left me-1"></i> History
+                </button>
+            </div>
+
+            <!-- Tables & Schema Tree Content -->
+            <div id="sidebarTablesContent" class="flex-1 overflow-y-auto p-3 space-y-3">
+                <div id="emptyTablesNotice" class="text-center py-8 px-2">
+                    <i class="fa-solid fa-folder-open text-3xl text-slate-700 mb-2"></i>
+                    <p class="text-xs text-slate-400 font-medium">No Tables Loaded</p>
+                    <p class="text-[11px] text-slate-500 mt-1">Upload CSV/Excel files or load the demo dataset to begin querying.</p>
+                </div>
+                <div id="tablesList" class="space-y-2"></div>
+            </div>
+
+            <!-- Query History Content -->
+            <div id="sidebarHistoryContent" class="hidden flex-1 overflow-y-auto p-3 space-y-2">
+                <div id="emptyHistoryNotice" class="text-center py-8">
+                    <p class="text-xs text-slate-500">No previous queries executed.</p>
+                </div>
+                <div id="historyList" class="space-y-2"></div>
+            </div>
+
+            <!-- Footer Stats Info -->
+            <div class="p-3 border-t border-slate-800 bg-slate-950/40 text-[11px] text-slate-500 flex justify-between items-center">
+                <span>Engine: AlaSQL v4.1</span>
+                <span id="totalMemoryRows">0 total rows</span>
+            </div>
+        </aside>
+
+        <!-- Center/Right Main Content Workspace -->
+        <main class="flex-1 flex flex-col overflow-hidden bg-slate-950">
+
+            <!-- Top Query Toolbar / Snippet Buttons -->
+            <div class="p-2 border-b border-slate-800 bg-slate-900/60 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div class="flex items-center space-x-1.5 overflow-x-auto py-0.5">
+                    <span class="text-slate-500 text-[11px] font-medium mr-1">Snippets:</span>
+                    <button onclick="insertSnippet('SELECT * FROM {table} LIMIT 10;')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/60 transition">SELECT *</button>
+                    <button onclick="insertSnippet('SELECT {col1}, COUNT(*) FROM {table} GROUP BY {col1};')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/60 transition">GROUP BY</button>
+                    <button onclick="insertSnippet('SELECT a.*, b.* FROM table1 a JOIN table2 b ON a.id = b.id;')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/60 transition">JOIN</button>
+                    <button onclick="insertSnippet('SELECT COUNT(*) AS total_records FROM {table};')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/60 transition">COUNT</button>
+                </div>
+
+                <div class="flex items-center space-x-2 shrink-0">
+                    <button onclick="clearEditor()" class="px-2.5 py-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded transition">
+                        Clear
+                    </button>
+
+                    <!-- Run Query Button with Shift + Enter Badge -->
+                    <button onclick="runQuery()" class="px-4 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold rounded-lg shadow-lg shadow-blue-500/20 flex items-center gap-1.5 transition active:scale-95">
+                        <i class="fa-solid fa-play text-xs"></i> Execute <span class="text-[10px] bg-black/30 border border-white/20 px-1.5 py-0.5 rounded font-mono ml-1">Shift + Enter</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Code Mirror Query Editor Box (Flexible height top panel) -->
+            <div class="h-56 min-h-[140px] relative border-b border-slate-800">
+                <textarea id="sqlCodeEditor"></textarea>
+            </div>
+
+            <!-- Notification / Toast Message Bar -->
+            <div id="toastNotification" class="hidden p-3 border-b border-slate-800 bg-slate-900 flex items-start gap-2 text-xs">
+                <i id="toastIcon" class="fa-solid fa-circle-info mt-0.5"></i>
+                <div class="flex-1 font-mono break-all" id="toastMessage"></div>
+                <button onclick="hideToast()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <!-- Bottom Output Section: Results Table & Visual Charts -->
+            <div class="flex-1 flex flex-col overflow-hidden bg-slate-900/30">
+                
+                <!-- Output Navigation Tabs & Controls -->
+                <div class="flex items-center justify-between border-b border-slate-800 bg-slate-900/80 px-3 text-xs">
+                    <div class="flex space-x-1">
+                        <button onclick="switchResultTab('table')" id="tabBtnTable" class="tab-btn active px-3 py-2 font-medium text-slate-300 flex items-center gap-1.5">
+                            <i class="fa-solid fa-table text-blue-400"></i> Results Data
+                        </button>
+                        <button onclick="switchResultTab('chart')" id="tabBtnChart" class="tab-btn px-3 py-2 font-medium text-slate-400 flex items-center gap-1.5">
+                            <i class="fa-solid fa-chart-column text-indigo-400"></i> Visualization
+                        </button>
+                    </div>
+
+                    <div class="flex items-center space-x-3">
+                        <span id="queryRuntimeStats" class="text-slate-400 font-mono text-[11px]">Ready</span>
+                        <div id="exportGroup" class="hidden flex items-center space-x-1.5">
+                            <button onclick="exportCSV()" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded text-[11px] flex items-center gap-1 transition">
+                                <i class="fa-solid fa-file-csv text-emerald-400"></i> CSV
+                            </button>
+                            <button onclick="exportJSON()" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded text-[11px] flex items-center gap-1 transition">
+                                <i class="fa-solid fa-code text-amber-400"></i> JSON
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 1: Tabular Results Output -->
+                <div id="resultTabTable" class="flex-1 flex flex-col overflow-hidden">
+                    <div id="searchFilterBar" class="hidden p-2 border-b border-slate-800/60 bg-slate-950/40 flex items-center justify-between gap-2">
+                        <div class="relative flex-1 max-w-xs">
+                            <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-2.5 text-slate-500 text-xs"></i>
+                            <input type="text" id="tableSearchInput" oninput="filterResultsTable()" placeholder="Filter results..." class="w-full bg-slate-900 border border-slate-800 rounded-md pl-8 pr-3 py-1 text-xs text-slate-200 outline-none focus:border-blue-500">
+                        </div>
+                        <span id="filteredRowCount" class="text-[11px] text-slate-500 font-mono"></span>
+                    </div>
+
+                    <div class="flex-1 overflow-auto">
+                        <table id="outputDataTable" class="w-full text-left text-xs text-slate-300">
+                            <thead class="bg-slate-900/90 text-slate-200 sticky top-0 border-b border-slate-800 font-mono">
+                                <tr id="outputTableHeader"></tr>
+                            </thead>
+                            <tbody id="outputTableBody" class="divide-y divide-slate-800/50 font-mono">
+                                <tr>
+                                    <td class="px-4 py-12 text-center text-slate-500 italic font-sans" colspan="100%">
+                                        Run a query above or click on a dataset to display results here.
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Tab 2: Chart.js Interactive Visualization -->
+                <div id="resultTabChart" class="hidden flex-1 flex flex-col p-4 overflow-y-auto">
+                    <div class="flex flex-wrap items-center gap-3 mb-4 bg-slate-900 p-3 rounded-xl border border-slate-800 text-xs">
+                        <div>
+                            <label class="block text-[10px] text-slate-400 font-medium mb-1">Chart Type</label>
+                            <select id="chartTypeSelect" onchange="updateChart()" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-200 outline-none">
+                                <option value="bar">Bar Chart</option>
+                                <option value="line">Line Chart</option>
+                                <option value="pie">Pie Chart</option>
+                                <option value="doughnut">Doughnut Chart</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] text-slate-400 font-medium mb-1">X-Axis / Category</label>
+                            <select id="chartXSelect" onchange="updateChart()" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-200 outline-none"></select>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] text-slate-400 font-medium mb-1">Y-Axis / Value</label>
+                            <select id="chartYSelect" onchange="updateChart()" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-200 outline-none"></select>
+                        </div>
+                    </div>
+                    
+                    <div class="flex-1 min-h-[250px] relative bg-slate-900/50 border border-slate-800/80 rounded-xl p-4 flex items-center justify-center">
+                        <canvas id="chartCanvas"></canvas>
+                        <p id="noChartNotice" class="text-slate-500 text-xs italic">Execute a query returning tabular data to generate charts.</p>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- Multi-File Drag & Drop Upload Modal -->
+    <div id="uploadModal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
+                    <i class="fa-solid fa-file-circle-plus text-blue-400"></i> Upload Data Files
+                </h3>
+                <button onclick="closeUploadModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <!-- Modal Drop Zone -->
+            <div id="modalDropZone" class="drop-zone rounded-xl p-8 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-slate-800/30">
+                <input type="file" id="modalFileInput" accept=".csv, .xls, .xlsx" multiple class="hidden">
+                <div class="w-12 h-12 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center mb-3 border border-blue-500/20">
+                    <i class="fa-solid fa-cloud-arrow-up text-xl"></i>
+                </div>
+                <p class="text-xs font-medium text-slate-200">Drag & drop CSV or Excel files here, or <span class="text-blue-400 underline">browse</span></p>
+                <p class="text-[11px] text-slate-500 mt-1">Select multiple files simultaneously (.csv, .xlsx, .xls)</p>
+            </div>
+
+            <div class="space-y-2 text-xs">
+                <div class="flex justify-between text-slate-400">
+                    <span>Table Naming Rule:</span>
+                    <span class="text-slate-300 font-mono">filename.csv → table_name</span>
+                </div>
+                <div class="flex justify-between text-slate-400">
+                    <span>Excel Multi-Sheet Support:</span>
+                    <span class="text-slate-300 font-mono">filename_sheetname</span>
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+                <button onclick="closeUploadModal()" class="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200 rounded-lg">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Application Logic Scripts -->
+    <script>
+        // Global Application State Variables
+        let editor;
+        let loadedTables = {}; // Storage for schema meta: { tableName: { columns: [], rowCount: 0 } }
+        let currentQueryResult = [];
+        let queryHistory = [];
+        let chartInstance = null;
+        let storedUploadedFiles = []; // Persistent reference for Shift+Enter & Data Sync re-parsing
+
+        // Initialize CodeMirror and listeners on DOM load
+        window.addEventListener('DOMContentLoaded', () => {
+            // Initialize CodeMirror
+            editor = CodeMirror.fromTextArea(document.getElementById('sqlCodeEditor'), {
+                mode: 'text/x-sql',
+                theme: 'dracula',
+                lineNumbers: true,
+                indentWithTabs: true,
+                smartIndent: true,
+                lineWrapping: true,
+                autofocus: true
+            });
+
+            // Set initial query sample text
+            editor.setValue(`-- Upload CSV/Excel files or click "Load Demo Datasets" to start querying!\n-- Keyboard Shortcut: Press Shift + Enter to Execute\nSELECT 'Welcome to DataStudio IDE' AS message;`);
+
+            // Register SHORTCUT KEY: Shift + Enter for Execution (and suppress default newline insertion)
+            editor.setOption("extraKeys", {
+                "Shift-Enter": function(cm) {
+                    runQuery();
+                }
+            });
+
+            // Fallback global handler to capture Shift+Enter across editor/inputs
+            document.addEventListener('keydown', function(e) {
+                if (e.shiftKey && e.key === 'Enter') {
+                    // Check if focused in editor or general input
+                    e.preventDefault();
+                    e.stopPropagation();
+                    runQuery();
+                }
+            }, true);
+
+            // Set up Modal Upload Event Handlers
+            const modalDropZone = document.getElementById('modalDropZone');
+            const modalFileInput = document.getElementById('modalFileInput');
+
+            modalDropZone.addEventListener('click', () => modalFileInput.click());
+            modalDropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                modalDropZone.classList.add('dragover');
+            });
+            modalDropZone.addEventListener('dragleave', () => modalDropZone.classList.remove('dragover'));
+            modalDropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                modalDropZone.classList.remove('dragover');
+                if (e.dataTransfer.files.length) {
+                    handleFiles(e.dataTransfer.files);
+                    closeUploadModal();
+                }
+            });
+            modalFileInput.addEventListener('change', (e) => {
+                if (e.target.files.length) {
+                    handleFiles(e.target.files);
+                    closeUploadModal();
+                }
+            });
+        });
+
+        // Modal Controls
+        function openUploadModal() {
+            document.getElementById('uploadModal').classList.remove('hidden');
+        }
+        function closeUploadModal() {
+            document.getElementById('uploadModal').classList.add('hidden');
+        }
+
+        // Refresh & Sync Excel / CSV Data Sources
+        async function refreshDataSources() {
+            const refreshIcon = document.getElementById('refreshIcon');
+            const syncTimeLabel = document.getElementById('lastSyncTimestamp');
+
+            if (!storedUploadedFiles || storedUploadedFiles.length === 0) {
+                showToast("No external file uploaded to refresh. Load files or demo datasets first.", "info");
+                return;
+            }
+
+            // Trigger visual spinning reload state
+            refreshIcon.classList.add('animate-spin-fast', 'text-blue-400');
+            showToast("Syncing data files...", "info");
+
+            try {
+                // Re-process all stored local file handles
+                for (const file of storedUploadedFiles) {
+                    await processSingleFile(file);
+                }
+
+                const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                syncTimeLabel.textContent = `Last synced: ${nowTime}`;
+                showToast("Excel & CSV datasets re-synced successfully!", "success");
+
+                // Re-run active query automatically to reflect refreshed data
+                if (editor && editor.getValue().trim()) {
+                    runQuery();
+                }
+
+            } catch (err) {
+                showToast(`Failed to sync data files: ${err.message}`, "error");
+            } finally {
+                refreshIcon.classList.remove('animate-spin-fast', 'text-blue-400');
+            }
+        }
+
+        // Sidebar Navigation Tab Switching
+        function switchSidebarTab(tab) {
+            const btnTables = document.getElementById('tabBtnTables');
+            const btnHistory = document.getElementById('tabBtnHistory');
+            const contentTables = document.getElementById('sidebarTablesContent');
+            const contentHistory = document.getElementById('sidebarHistoryContent');
+
+            if (tab === 'tables') {
+                btnTables.className = "flex-1 py-2.5 text-center hover:text-slate-200 border-b-2 border-blue-500 text-blue-400 bg-slate-800/40";
+                btnHistory.className = "flex-1 py-2.5 text-center hover:text-slate-200 border-b-2 border-transparent text-slate-400";
+                contentTables.classList.remove('hidden');
+                contentHistory.classList.add('hidden');
+            } else {
+                btnHistory.className = "flex-1 py-2.5 text-center hover:text-slate-200 border-b-2 border-blue-500 text-blue-400 bg-slate-800/40";
+                btnTables.className = "flex-1 py-2.5 text-center hover:text-slate-200 border-b-2 border-transparent text-slate-400";
+                contentHistory.classList.remove('hidden');
+                contentTables.classList.add('hidden');
+            }
+        }
+
+        // Results View Switching (Table vs Chart)
+        function switchResultTab(tab) {
+            const btnTable = document.getElementById('tabBtnTable');
+            const btnChart = document.getElementById('tabBtnChart');
+            const viewTable = document.getElementById('resultTabTable');
+            const viewChart = document.getElementById('resultTabChart');
+
+            if (tab === 'table') {
+                btnTable.classList.add('active');
+                btnChart.classList.remove('active');
+                viewTable.classList.remove('hidden');
+                viewChart.classList.add('hidden');
+            } else {
+                btnChart.classList.add('active');
+                btnTable.classList.remove('active');
+                viewChart.classList.remove('hidden');
+                viewTable.classList.add('hidden');
+                updateChart();
+            }
+        }
+
+        // Sanitizer helper for valid SQL Identifiers
+        function sanitizeName(name) {
+            if (!name) return 'table_data';
+            let clean = String(name).trim().toLowerCase()
+                .replace(/\.[^/.]+$/, "") // strip extension
+                .replace(/[^a-zA-Z0-9_]/g, "_");
+            if (/^[0-9]/.test(clean)) clean = 'tbl_' + clean;
+            return clean || 'table_data';
+        }
+
+        function sanitizeCol(name) {
+            if (!name) return 'col_unnamed';
+            let clean = String(name).trim().toLowerCase().replace(/[^a-zA-Z0-9_]/g, "_");
+            if (/^[0-9]/.test(clean)) clean = 'col_' + clean;
+            return clean || 'col_unnamed';
+        }
+
+        // Multi-File Upload Handler
+        function handleFiles(files) {
+            const fileList = Array.from(files);
+            // Save to persistent file references
+            storedUploadedFiles = [...storedUploadedFiles, ...fileList];
+
+            fileList.forEach(file => {
+                processSingleFile(file);
+            });
+            
+            const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            document.getElementById('lastSyncTimestamp').textContent = `Last synced: ${nowTime}`;
+        }
+
+        function processSingleFile(file) {
+            return new Promise((resolve, reject) => {
+                const ext = file.name.split('.').pop().toLowerCase();
+                if (ext === 'csv') {
+                    parseCSVFile(file, resolve, reject);
+                } else if (['xlsx', 'xls'].includes(ext)) {
+                    parseExcelFile(file, resolve, reject);
+                } else {
+                    showToast(`Unsupported file extension: .${ext}`, 'error');
+                    reject(new Error(`Unsupported file extension: .${ext}`));
+                }
+            });
+        }
+
+        // Parse CSV File
+        function parseCSVFile(file, resolve, reject) {
+            const rawTableName = sanitizeName(file.name);
+            Papa.parse(file, {
+                header: true,
+                skipEmptyLines: true,
+                dynamicTyping: true,
+                complete: function(results) {
+                    if (results.data && results.data.length > 0) {
+                        registerTableIntoEngine(rawTableName, results.data);
+                        showToast(`Table '${rawTableName}' created successfully (${results.data.length} rows).`, 'success');
+                        if (resolve) resolve();
+                    } else {
+                        showToast(`File '${file.name}' is empty.`, 'error');
+                        if (reject) reject(new Error('File is empty'));
+                    }
+                },
+                error: function(err) {
+                    showToast(`Error parsing ${file.name}: ${err.message}`, 'error');
+                    if (reject) reject(err);
+                }
+            });
+        }
+
+        // Parse Excel File
+        function parseExcelFile(file, resolve, reject) {
+            const baseTableName = sanitizeName(file.name);
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    
+                    workbook.SheetNames.forEach((sheetName) => {
+                        const json = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: null });
+                        if (json && json.length > 0) {
+                            const tableName = workbook.SheetNames.length === 1 ? 
+                                baseTableName : `${baseTableName}_${sanitizeName(sheetName)}`;
+                            registerTableIntoEngine(tableName, json);
+                        }
+                    });
+                    showToast(`Loaded Excel dataset '${file.name}'.`, 'success');
+                    if (resolve) resolve();
+                } catch(err) {
+                    showToast(`Error reading Excel file: ${err.message}`, 'error');
+                    if (reject) reject(err);
+                }
+            };
+            reader.onerror = (err) => reject(err);
+            reader.readAsArrayBuffer(file);
+        }
+
+        // Register table into AlaSQL & Update Schema Inspector
+        function registerTableIntoEngine(tableName, rawData) {
+            if (!rawData || !rawData.length) return;
+
+            // Normalize Column Keys
+            const originalCols = Object.keys(rawData[0]);
+            const colMap = {};
+            const cleanCols = [];
+
+            originalCols.forEach(col => {
+                const clean = sanitizeCol(col);
+                colMap[col] = clean;
+                cleanCols.push(clean);
+            });
+
+            const cleanedData = rawData.map(row => {
+                const newRow = {};
+                for (const key in row) {
+                    newRow[colMap[key]] = row[key];
+                }
+                return newRow;
+            });
+
+            // Register into AlaSQL Engine
+            alasql(`DROP TABLE IF EXISTS ${tableName}`);
+            alasql(`CREATE TABLE ${tableName}`);
+            alasql.tables[tableName].data = cleanedData;
+
+            // Also map to standard default alias 'data' for quick convenience
+            alasql(`DROP TABLE IF EXISTS data`);
+            alasql(`CREATE TABLE data`);
+            alasql.tables['data'].data = cleanedData;
+
+            // Store Metadata
+            loadedTables[tableName] = {
+                columns: cleanCols,
+                rowCount: cleanedData.length
+            };
+
+            updateSidebarTablesUI();
+        }
+
+        // Pre-load Demo Datasets for multi-table JOIN testing
+        function loadDemoData() {
+            const demoCustomers = [
+                { cust_id: 101, name: 'Acme Corp', industry: 'Tech', city: 'New York' },
+                { cust_id: 102, name: 'Starlight Retail', industry: 'Ecommerce', city: 'Chicago' },
+                { cust_id: 103, name: 'Apex Global', industry: 'Finance', city: 'London' },
+                { cust_id: 104, name: 'LogiTech Supply', industry: 'Logistics', city: 'Berlin' }
+            ];
+
+            const demoOrders = [
+                { order_id: 5001, cust_id: 101, amount: 2450.00, status: 'Completed', year: 2024 },
+                { order_id: 5002, cust_id: 102, amount: 1200.50, status: 'Pending', year: 2024 },
+                { order_id: 5003, cust_id: 101, amount: 890.00, status: 'Completed', year: 2024 },
+                { order_id: 5004, cust_id: 103, amount: 5600.00, status: 'Completed', year: 2023 },
+                { order_id: 5005, cust_id: 104, amount: 3100.25, status: 'Cancelled', year: 2024 }
+            ];
+
+            registerTableIntoEngine('customers', demoCustomers);
+            registerTableIntoEngine('orders', demoOrders);
+
+            editor.setValue(`-- Multi-table JOIN example on loaded demo datasets\n-- Press Shift + Enter to execute query\nSELECT \n  c.name AS customer_name,\n  c.industry,\n  o.order_id,\n  o.amount,\n  o.status\nFROM customers c\nJOIN orders o ON c.cust_id = o.cust_id\nORDER BY o.amount DESC;`);
+            
+            const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            document.getElementById('lastSyncTimestamp').textContent = `Last synced: ${nowTime}`;
+            showToast("Demo datasets 'customers' and 'orders' loaded!", 'success');
+            runQuery();
+        }
+
+        // Refresh Sidebar Tables Schema Tree
+        function updateSidebarTablesUI() {
+            const container = document.getElementById('tablesList');
+            const emptyNotice = document.getElementById('emptyTablesNotice');
+            const tableKeys = Object.keys(loadedTables);
+
+            document.getElementById('tableCountBadge').textContent = tableKeys.length;
+            
+            let totalRows = 0;
+            tableKeys.forEach(k => totalRows += loadedTables[k].rowCount);
+            document.getElementById('totalMemoryRows').textContent = `${totalRows.toLocaleString()} total rows`;
+
+            if (tableKeys.length === 0) {
+                emptyNotice.classList.remove('hidden');
+                container.innerHTML = '';
+                return;
+            }
+
+            emptyNotice.classList.add('hidden');
+            
+            container.innerHTML = tableKeys.map(tName => {
+                const meta = loadedTables[tName];
+                const colsList = meta.columns.map(c => 
+                    `<li onclick="insertAtCursor('${c}')" class="text-[11px] text-slate-400 hover:text-blue-300 py-0.5 px-2 rounded cursor-pointer hover:bg-slate-800 flex items-center justify-between group">
+                        <span><i class="fa-solid fa-columns text-[9px] me-1.5 text-slate-600 group-hover:text-blue-400"></i>${c}</span>
+                    </li>`
+                ).join('');
+
+                return `
+                    <div class="border border-slate-800 rounded-lg bg-slate-950/60 overflow-hidden">
+                        <div class="p-2 bg-slate-900/80 flex items-center justify-between cursor-pointer hover:bg-slate-800/80" onclick="toggleTableTree('${tName}')">
+                            <span class="text-xs font-semibold text-slate-200 flex items-center gap-1.5 font-mono">
+                                <i class="fa-solid fa-table text-blue-400 text-[11px]"></i> ${tName}
+                            </span>
+                            <div class="flex items-center gap-1.5">
+                                <span class="text-[10px] text-slate-500 font-mono">${meta.rowCount} rows</span>
+                                <i id="treeIcon_${tName}" class="fa-solid fa-chevron-right text-[10px] text-slate-500"></i>
+                            </div>
+                        </div>
+                        <div id="treeCols_${tName}" class="hidden p-1.5 bg-slate-950/40 border-t border-slate-800/60 space-y-0.5">
+                            <div class="text-[10px] text-slate-500 px-2 py-0.5 font-medium flex justify-between">
+                                <span>Columns</span>
+                                <button onclick="insertAtCursor('${tName}')" class="text-blue-400 hover:underline">Insert Table</button>
+                            </div>
+                            <ul>${colsList}</ul>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function toggleTableTree(tableName) {
+            const colsDiv = document.getElementById(`treeCols_${tableName}`);
+            const icon = document.getElementById(`treeIcon_${tableName}`);
+            if (colsDiv.classList.contains('hidden')) {
+                colsDiv.classList.remove('hidden');
+                icon.className = "fa-solid fa-chevron-down text-[10px] text-slate-500";
+            } else {
+                colsDiv.classList.add('hidden');
+                icon.className = "fa-solid fa-chevron-right text-[10px] text-slate-500";
+            }
+        }
+
+        // Insert text at cursor in CodeMirror editor
+        function insertAtCursor(text) {
+            const doc = editor.getDoc();
+            const cursor = doc.getCursor();
+            doc.replaceRange(text, cursor);
+            editor.focus();
+        }
+
+        function insertSnippet(template) {
+            const keys = Object.keys(loadedTables);
+            const firstTable = keys.length ? keys[0] : 'data';
+            const firstCol = keys.length && loadedTables[firstTable].columns.length ? loadedTables[firstTable].columns[0] : 'id';
+            
+            let query = template.replace(/{table}/g, firstTable).replace(/{col1}/g, firstCol);
+            editor.setValue(query);
+            editor.focus();
+        }
+
+        function clearEditor() {
+            editor.setValue('');
+            editor.focus();
+        }
+
+        // Execute SQL Query
+        function runQuery() {
+            hideToast();
+            const query = editor.getValue().trim();
+
+            if (!query) {
+                showToast("Please enter a SQL query to execute.", "error");
+                return;
+            }
+
+            const startTime = performance.now();
+
+            try {
+                const result = alasql(query);
+                const duration = (performance.now() - startTime).toFixed(1);
+
+                // Add to Query History
+                addHistoryItem(query, duration);
+
+                if (Array.isArray(result)) {
+                    currentQueryResult = result;
+                    renderOutputTable(result, duration);
+                    populateChartSelectors(result);
+                } else if (typeof result === 'object') {
+                    currentQueryResult = [result];
+                    renderOutputTable([result], duration);
+                    populateChartSelectors([result]);
+                } else {
+                    currentQueryResult = [];
+                    renderOutputTable([], duration, String(result));
+                }
+
+            } catch (err) {
+                showToast(`SQL Error: ${err.message}`, "error");
+                document.getElementById('queryRuntimeStats').textContent = "Execution Failed";
+            }
+        }
+
+        // Render Tabular Output
+        function renderOutputTable(data, duration, nonArrayMessage = null) {
+            const thead = document.getElementById('outputTableHeader');
+            const tbody = document.getElementById('outputTableBody');
+            const stats = document.getElementById('queryRuntimeStats');
+            const exportGroup = document.getElementById('exportGroup');
+            const filterBar = document.getElementById('searchFilterBar');
+
+            if (nonArrayMessage !== null) {
+                stats.textContent = `Completed in ${duration} ms`;
+                thead.innerHTML = '';
+                tbody.innerHTML = `<tr><td class="px-4 py-8 text-center text-emerald-400 font-mono" colspan="100%">Statement executed. Result: ${nonArrayMessage}</td></tr>`;
+                exportGroup.classList.add('hidden');
+                filterBar.classList.add('hidden');
+                return;
+            }
+
+            if (!data || data.length === 0) {
+                stats.textContent = `0 rows (${duration} ms)`;
+                thead.innerHTML = '';
+                tbody.innerHTML = `<tr><td class="px-4 py-8 text-center text-slate-500 italic" colspan="100%">Query returned 0 records.</td></tr>`;
+                exportGroup.classList.add('hidden');
+                filterBar.classList.add('hidden');
+                return;
+            }
+
+            stats.textContent = `${data.length.toLocaleString()} rows returned (${duration} ms)`;
+            exportGroup.classList.remove('hidden');
+            filterBar.classList.remove('hidden');
+
+            const columns = Object.keys(data[0]);
+
+            // Header
+            thead.innerHTML = columns.map(c => 
+                `<th class="px-4 py-2.5 border-b border-slate-800 text-slate-300 font-semibold">${c}</th>`
+            ).join('');
+
+            // Rows
+            renderTableBodyRows(data, columns);
+        }
+
+        function renderTableBodyRows(data, columns) {
+            const tbody = document.getElementById('outputTableBody');
+            document.getElementById('filteredRowCount').textContent = `Showing ${data.length} rows`;
+
+            tbody.innerHTML = data.slice(0, 500).map(row => {
+                const cells = columns.map(col => {
+                    const val = row[col];
+                    let display = val;
+                    if (val === null || val === undefined) display = '<span class="text-slate-600">null</span>';
+                    else if (typeof val === 'object') display = JSON.stringify(val);
+                    return `<td class="px-4 py-2 whitespace-nowrap border-b border-slate-800/40">${display}</td>`;
+                }).join('');
+                return `<tr class="hover:bg-slate-800/40">${cells}</tr>`;
+            }).join('');
+        }
+
+        // Filter results client-side
+        function filterResultsTable() {
+            const term = document.getElementById('tableSearchInput').value.toLowerCase();
+            if (!currentQueryResult.length) return;
+            const columns = Object.keys(currentQueryResult[0]);
+
+            const filtered = currentQueryResult.filter(row => {
+                return columns.some(col => String(row[col]).toLowerCase().includes(term));
+            });
+
+            renderTableBodyRows(filtered, columns);
+        }
+
+        // Populate Chart Dropdown Selectors
+        function populateChartSelectors(data) {
+            const xSelect = document.getElementById('chartXSelect');
+            const ySelect = document.getElementById('chartYSelect');
+            
+            if (!data || !data.length) return;
+            const cols = Object.keys(data[0]);
+
+            xSelect.innerHTML = cols.map(c => `<option value="${c}">${c}</option>`).join('');
+            ySelect.innerHTML = cols.map(c => `<option value="${c}">${c}</option>`).join('');
+
+            // Smart auto-select numeric column for Y
+            if (cols.length >= 2) {
+                ySelect.selectedIndex = 1;
+            }
+        }
+
+        // Render Chart.js Visualization
+        function updateChart() {
+            if (!currentQueryResult || !currentQueryResult.length) return;
+
+            const chartType = document.getElementById('chartTypeSelect').value;
+            const xCol = document.getElementById('chartXSelect').value;
+            const yCol = document.getElementById('chartYSelect').value;
+
+            const labels = currentQueryResult.map(r => String(r[xCol] ?? ''));
+            const values = currentQueryResult.map(r => Number(r[yCol]) || 0);
+
+            document.getElementById('noChartNotice').classList.add('hidden');
+
+            if (chartInstance) chartInstance.destroy();
+
+            const ctx = document.getElementById('chartCanvas').getContext('2d');
+            chartInstance = new Chart(ctx, {
+                type: chartType,
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: yCol,
+                        data: values,
+                        backgroundColor: [
+                            'rgba(59, 130, 246, 0.7)',
+                            'rgba(99, 102, 241, 0.7)',
+                            'rgba(168, 85, 247, 0.7)',
+                            'rgba(236, 72, 153, 0.7)',
+                            'rgba(16, 185, 129, 0.7)'
+                        ],
+                        borderColor: '#3b82f6',
+                        borderWidth: 1.5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { labels: { color: '#94a3b8' } }
+                    },
+                    scales: (chartType === 'pie' || chartType === 'doughnut') ? {} : {
+                        x: { ticks: { color: '#64748b' }, grid: { color: '#1e293b' } },
+                        y: { ticks: { color: '#64748b' }, grid: { color: '#1e293b' } }
+                    }
+                }
+            });
+        }
+
+        // History Management
+        function addHistoryItem(sql, duration) {
+            queryHistory.unshift({ sql, duration, timestamp: new Date().toLocaleTimeString() });
+            const list = document.getElementById('historyList');
+            document.getElementById('emptyHistoryNotice').classList.add('hidden');
+
+            list.innerHTML = queryHistory.map((item, idx) => `
+                <div class="p-2 border border-slate-800 rounded bg-slate-950/60 hover:bg-slate-900 transition">
+                    <p class="text-[11px] font-mono text-slate-300 truncate">${item.sql}</p>
+                    <div class="flex items-center justify-between mt-1 text-[10px] text-slate-500">
+                        <span>${item.timestamp} • ${item.duration}ms</span>
+                        <button onclick="reRunHistory(${idx})" class="text-blue-400 hover:underline">Re-run</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function reRunHistory(idx) {
+            if (queryHistory[idx]) {
+                editor.setValue(queryHistory[idx].sql);
+                runQuery();
+            }
+        }
+
+        // Export Utilities
+        function exportCSV() {
+            if (!currentQueryResult.length) return;
+            const csv = Papa.unparse(currentQueryResult);
+            downloadBlob(csv, 'datastudio_export.csv', 'text/csv');
+        }
+
+        function exportJSON() {
+            if (!currentQueryResult.length) return;
+            const json = JSON.stringify(currentQueryResult, null, 2);
+            downloadBlob(json, 'datastudio_export.json', 'application/json');
+        }
+
+        function downloadBlob(content, filename, contentType) {
+            const blob = new Blob([content], { type: contentType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // Toast Messages
+        function showToast(msg, type = 'info') {
+            const toast = document.getElementById('toastNotification');
+            const icon = document.getElementById('toastIcon');
+            const message = document.getElementById('toastMessage');
+
+            message.textContent = msg;
+            toast.classList.remove('hidden', 'text-red-400', 'text-emerald-400', 'text-blue-400');
+
+            if (type === 'error') {
+                toast.classList.add('text-red-400');
+                icon.className = 'fa-solid fa-triangle-exclamation mt-0.5';
+            } else if (type === 'success') {
+                toast.classList.add('text-emerald-400');
+                icon.className = 'fa-solid fa-circle-check mt-0.5';
+            } else {
+                toast.classList.add('text-blue-400');
+                icon.className = 'fa-solid fa-circle-info mt-0.5';
+            }
+        }
+
+        function hideToast() {
+            document.getElementById('toastNotification').classList.add('hidden');
+        }
+    </script>
+</body>
+</html>
